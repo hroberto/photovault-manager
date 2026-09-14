@@ -1,0 +1,12 @@
+[package]
+name = "photovault-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true }
+blake3 = { workspace = true }

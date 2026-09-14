@@ -1,0 +1,10 @@
+/target
+**/target
+/node_modules
+/frontend/node_modules
+/frontend/dist
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+/vault
