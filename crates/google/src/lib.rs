@@ -15,6 +15,6 @@ pub mod auth;
 pub mod client;
 pub mod quota;
 
-pub use auth::{PkceChallenge, TokenSet, TokenStore};
+pub use auth::{EntropyError, PkceChallenge, TokenSet, TokenStore};
 pub use client::{ApiError, CreatedItem, PendingItem, PhotosClient, BATCH_LIMIT};
 pub use quota::{BudgetDecision, DailyBudget};

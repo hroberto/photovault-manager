@@ -35,6 +35,16 @@ pub const SCOPE_PICKER: &str = "https://www.googleapis.com/auth/photospicker.med
 /// É o que elimina a pior parte da exportação: baixar oito arquivos de 50 GB à mão.
 pub const SCOPE_DRIVE_READONLY: &str = "https://www.googleapis.com/auth/drive.readonly";
 
+/// O sistema operacional não forneceu aleatoriedade.
+///
+/// Não há recuperação sensata: sem entropia confiável não se gera um desafio PKCE que preste.
+/// Quem chama aborta a autorização.
+#[derive(Debug, thiserror::Error)]
+#[error("sem entropia do sistema para gerar o desafio PKCE: {detail}")]
+pub struct EntropyError {
+    detail: String,
+}
+
 /// Desafio PKCE de uma autorização.
 ///
 /// O `verifier` nunca sai da máquina. O `challenge` é o que viaja na URL.
@@ -59,10 +69,16 @@ impl PkceChallenge {
     }
 
     /// Gera um desafio com entropia do sistema.
-    pub fn generate() -> Self {
+    ///
+    /// Falha quando o sistema operacional não entrega aleatoriedade. É um erro, e não um
+    /// pânico, porque quem chama precisa poder abortar a autorização com uma mensagem — e
+    /// porque a alternativa silenciosa seria pior: um `verifier` previsível anula o PKCE.
+    pub fn generate() -> Result<Self, EntropyError> {
         let mut entropy = [0u8; 32];
-        getrandom::fill(&mut entropy).expect("fonte de entropia do sistema");
-        Self::from_entropy(&entropy)
+        getrandom::fill(&mut entropy).map_err(|source| EntropyError {
+            detail: source.to_string(),
+        })?;
+        Ok(Self::from_entropy(&entropy))
     }
 
     /// Segredo que fica na máquina e é enviado só na troca do código.
@@ -260,15 +276,15 @@ mod tests {
 
     #[test]
     fn generated_challenges_differ() {
-        let a = PkceChallenge::generate();
-        let b = PkceChallenge::generate();
+        let a = PkceChallenge::generate().expect("entropia do sistema");
+        let b = PkceChallenge::generate().expect("entropia do sistema");
         assert_ne!(a.verifier(), b.verifier());
     }
 
     #[test]
     fn verifier_length_is_within_the_rfc_range() {
         // O RFC exige entre 43 e 128 caracteres.
-        let challenge = PkceChallenge::generate();
+        let challenge = PkceChallenge::generate().expect("entropia do sistema");
         assert!((43..=128).contains(&challenge.verifier().len()));
     }
 

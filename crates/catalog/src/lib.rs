@@ -566,6 +566,14 @@ impl Catalog {
     }
 
     /// Registra que os bytes de um item subiram.
+    ///
+    /// O `upload_token` é gravado em claro, e isso não contraria a regra da credencial no
+    /// chaveiro: ele não dá acesso a nada. É um recibo de curta duração dos bytes já enviados,
+    /// emitido pelo Google e válido só para criar aquele item. Guardá-lo é justamente o que
+    /// torna a retomada barata — sem ele, uma queda entre o envio e a criação obrigaria a subir
+    /// os bytes de novo, e numa cota de 10.000 requisições por dia isso custa horas.
+    ///
+    /// O que nunca entra aqui é o `refresh_token`. Esse vive no chaveiro do sistema.
     pub async fn mark_uploaded(
         &self,
         run: RestoreRunId,
