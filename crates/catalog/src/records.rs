@@ -79,6 +79,8 @@ pub struct ImportTally {
     pub bytes_stored: u64,
     /// Arquivos que falharam ao ser lidos ou guardados.
     pub failures: u64,
+    /// Vínculos de parentesco estabelecidos (versão editada, componente de movimento).
+    pub relations_linked: u64,
 }
 
 /// Um sidecar aguardando revisão humana.
@@ -94,6 +96,27 @@ pub struct OrphanRow {
     pub reason: String,
     /// Arquivos que poderiam ser o dono, quando o caso foi de ambiguidade.
     pub candidates: Vec<String>,
+}
+
+/// Um item com tudo que precisa ser embutido no arquivo.
+#[derive(Debug, Clone)]
+pub struct NormalizationRow {
+    /// Item no catálogo.
+    pub media_id: i64,
+    /// Hash do objeto que guarda os bytes.
+    pub object_hash: String,
+    /// Nome do arquivo, que determina o formato.
+    pub filename: String,
+    /// Data de captura, em epoch UTC.
+    pub captured_at: Option<i64>,
+    /// Descrição escrita pelo usuário.
+    pub description: Option<String>,
+    /// Marcada como favorita.
+    pub favorited: bool,
+    /// Coordenada efetiva.
+    pub location: Option<(f64, f64, Option<f64>)>,
+    /// Nomes das pessoas marcadas.
+    pub people: Vec<String>,
 }
 
 /// Números gerais do cofre.

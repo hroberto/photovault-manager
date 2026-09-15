@@ -36,7 +36,7 @@ Verificados contra a documentação oficial. Não os contradiga sem verificar de
 crates/core/       domínio, sem dependência de Google
 crates/takeout/    parser do Takeout  ← maior risco técnico
 crates/google/     auth, picker, upload, drive
-crates/exif/       leitura e escrita de metadados
+crates/exif/       escrita e verificação de metadados embutidos
 crates/cas/        content addressable storage
 crates/catalog/    SQLite + SQLx
 crates/restore/    restauração
@@ -58,7 +58,22 @@ cargo test                          # todos os testes
 cargo test -p photovault-takeout    # só o parser
 cargo clippy --all -- -D warnings   # obrigatório antes de considerar pronto
 cargo run -p photovault-cli -- import-takeout ./Takeout --vault ~/PhotoVault
+cargo run -p photovault-cli -- normalize --vault ~/PhotoVault
+cargo run -p photovault-cli -- verify --sample 2 --vault ~/PhotoVault
+cargo run -p photovault-cli -- orphans --vault ~/PhotoVault
 ```
+
+## Estado atual (V0.2)
+
+Pronto e testado: domínio, parser do Takeout, CAS, catálogo, CLI de importação,
+detecção de parentesco e normalização de metadados. 175 testes.
+
+Pendente por depender de credenciais OAuth que só o usuário pode criar: `crates/google`
+(Picker, upload, Drive), `crates/restore`, `crates/advisor`, interface Tauri.
+
+Limite conhecido do `crates/exif`: o backend nativo grava EXIF, não XMP. Nomes de pessoas
+e favoritos são reportados como não embutidos, com o remédio (ExifTool). Nunca são
+descartados em silêncio.
 
 ## Especialistas
 

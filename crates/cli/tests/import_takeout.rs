@@ -359,6 +359,39 @@ async fn edited_version_is_imported_without_a_sidecar() {
 }
 
 #[tokio::test]
+async fn live_photo_components_are_linked_not_duplicated() {
+    let h = run().await;
+    // IMG_1004.HEIC + IMG_1004.MP4 são um item lógico partido em dois arquivos.
+    let parent: Option<i64> =
+        sqlx::query_scalar("SELECT motion_part_of FROM media WHERE filename = 'IMG_1004.MP4'")
+            .fetch_one(h.catalog.pool())
+            .await
+            .expect("consulta");
+    let still: i64 = sqlx::query_scalar("SELECT id FROM media WHERE filename = 'IMG_1004.HEIC'")
+        .fetch_one(h.catalog.pool())
+        .await
+        .expect("consulta");
+    assert_eq!(parent, Some(still), "o MP4 aponta para o HEIC");
+}
+
+#[tokio::test]
+async fn edited_version_is_linked_to_its_original() {
+    let h = run().await;
+    // Sem este vínculo, um deduplicador apagaria a versão editada por ser quase idêntica.
+    let parent: Option<i64> =
+        sqlx::query_scalar("SELECT edited_from FROM media WHERE filename = 'IMG_1003-edited.HEIC'")
+            .fetch_one(h.catalog.pool())
+            .await
+            .expect("consulta");
+    let original: i64 = sqlx::query_scalar("SELECT id FROM media WHERE filename = 'IMG_1003.HEIC'")
+        .fetch_one(h.catalog.pool())
+        .await
+        .expect("consulta");
+    assert_eq!(parent, Some(original));
+    assert!(h.outcome.tally.relations_linked >= 2);
+}
+
+#[tokio::test]
 async fn live_photo_components_are_both_stored() {
     let h = run().await;
     let count: i64 =

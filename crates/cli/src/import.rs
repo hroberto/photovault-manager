@@ -12,8 +12,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use photovault_cas::ObjectStore;
 use photovault_catalog::{AlbumId, Catalog, ImportRunId, ImportTally, NewMedia};
+use photovault_core::MediaId;
 use photovault_core::{Fidelity, MediaKind, SourceKind};
-use photovault_takeout::{match_directory, MatchConfidence, OrphanReason, Sidecar};
+use photovault_takeout::{
+    detect_relations, match_directory, MatchConfidence, OrphanReason, Relation, Sidecar,
+};
 
 /// Resultado de uma importação, para o relatório final.
 #[derive(Debug, Default)]
@@ -151,10 +154,13 @@ async fn import_directory(
         None => None,
     };
 
+    // Nome do arquivo para o item catalogado, usado adiante para ligar os parentes.
+    let mut ingested: BTreeMap<String, MediaId> = BTreeMap::new();
+
     for matched in &report.matched {
         let sidecar_path = directory.join(&matched.sidecar);
         let sidecar = read_sidecar(&sidecar_path, outcome);
-        ingest(
+        if let Some(id) = ingest(
             &directory.join(&matched.media),
             &matched.media,
             sidecar.as_ref(),
@@ -164,7 +170,10 @@ async fn import_directory(
             run,
             outcome,
         )
-        .await?;
+        .await?
+        {
+            ingested.insert(matched.media.clone(), id);
+        }
 
         if matched.confidence == MatchConfidence::Truncated {
             outcome.warnings.push(format!(
@@ -176,7 +185,7 @@ async fn import_directory(
 
     // Mídia sem sidecar entra mesmo assim: perder os bytes seria pior que perder o metadado.
     for media in &report.media_without_sidecar {
-        ingest(
+        if let Some(id) = ingest(
             &directory.join(media),
             media,
             None,
@@ -186,8 +195,15 @@ async fn import_directory(
             run,
             outcome,
         )
-        .await?;
+        .await?
+        {
+            ingested.insert(media.clone(), id);
+        }
     }
+
+    // Parentesco: precisa acontecer depois que todos os itens do diretório existem, porque um
+    // vínculo liga dois deles.
+    link_relations(&ingested, catalog, outcome).await?;
 
     for orphan in &report.orphan_sidecars {
         let candidates = match &orphan.reason {
@@ -224,10 +240,10 @@ async fn ingest(
     catalog: &Catalog,
     run: ImportRunId,
     outcome: &mut ImportOutcome,
-) -> Result<()> {
+) -> Result<Option<MediaId>> {
     let Some(kind) = media_kind(filename) else {
         // Não é mídia: `archive_browser.html`, `.txt` de descrição, e afins.
-        return Ok(());
+        return Ok(None);
     };
 
     outcome.tally.media_seen += 1;
@@ -239,7 +255,7 @@ async fn ingest(
             outcome
                 .failures
                 .push(format!("{}: {error}", path.display()));
-            return Ok(());
+            return Ok(None);
         }
     };
 
@@ -311,6 +327,41 @@ async fn ingest(
             .context("associar ao álbum")?;
     }
 
+    Ok(Some(media_id))
+}
+
+/// Aplica os vínculos de parentesco detectados entre os arquivos do diretório.
+async fn link_relations(
+    ingested: &BTreeMap<String, MediaId>,
+    catalog: &Catalog,
+    outcome: &mut ImportOutcome,
+) -> Result<()> {
+    let names: Vec<&String> = ingested.keys().collect();
+    for relation in detect_relations(names) {
+        match relation {
+            Relation::EditedFrom { edited, original } => {
+                if let (Some(&child), Some(&parent)) =
+                    (ingested.get(&edited), ingested.get(&original))
+                {
+                    catalog
+                        .set_edited_from(child, parent)
+                        .await
+                        .context("ligar versão editada")?;
+                    outcome.tally.relations_linked += 1;
+                }
+            }
+            Relation::MotionPartOf { motion, still } => {
+                if let (Some(&child), Some(&parent)) = (ingested.get(&motion), ingested.get(&still))
+                {
+                    catalog
+                        .set_motion_part_of(child, parent)
+                        .await
+                        .context("ligar componente de movimento")?;
+                    outcome.tally.relations_linked += 1;
+                }
+            }
+        }
+    }
     Ok(())
 }
 

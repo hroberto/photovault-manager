@@ -5,6 +5,7 @@ members = [
     "crates/takeout",
     "crates/cas",
     "crates/catalog",
+    "crates/exif",
     "crates/cli",
 ]
 
@@ -18,6 +19,7 @@ license = "MIT OR Apache-2.0"
 photovault-core = { path = "crates/core" }
 photovault-takeout = { path = "crates/takeout" }
 photovault-cas = { path = "crates/cas" }
+photovault-exif = { path = "crates/exif" }
 tempfile = "3"
 sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }

@@ -11,6 +11,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use photovault_cas::ObjectStore;
 use photovault_catalog::{records::human_bytes, Catalog};
+use photovault_core::{GeoPoint, PersonName};
+use photovault_exif::{EmbeddedMetadata, ExifError, Field};
 
 mod import;
 
@@ -46,6 +48,15 @@ enum Command {
     },
     /// Lista os sidecars que precisam de revisão humana.
     Orphans,
+    /// Grava os metadados do catálogo dentro de cópias dos arquivos.
+    ///
+    /// O objeto original nunca é tocado. A cópia enriquecida vai para `derived/normalized/`,
+    /// e é ela que sobe para o Google — sem GPS embutido, a localização se perde no caminho.
+    Normalize {
+        /// Processa apenas os primeiros N itens.
+        #[arg(long)]
+        limit: Option<i64>,
+    },
 }
 
 #[tokio::main]
@@ -66,6 +77,7 @@ async fn main() -> Result<()> {
         Command::Status => run_status(&vault).await,
         Command::Verify { sample } => run_verify(&vault, sample).await,
         Command::Orphans => run_orphans(&vault).await,
+        Command::Normalize { limit } => run_normalize(&vault, limit).await,
     }
 }
 
@@ -108,6 +120,12 @@ async fn run_import(vault: &Path, source: &Path, label: Option<&str>) -> Result<
         "  bytes guardados              {:>8}",
         human_bytes(tally.bytes_stored)
     );
+    if tally.relations_linked > 0 {
+        println!(
+            "  parentescos ligados          {:>8}",
+            tally.relations_linked
+        );
+    }
     println!();
     println!("SIDECARS");
     println!(
@@ -289,6 +307,120 @@ async fn run_orphans(vault: &Path) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn run_normalize(vault: &Path, limit: Option<i64>) -> Result<()> {
+    let (store, catalog) = open_vault(vault).await?;
+    let rows = catalog
+        .media_for_normalization(limit)
+        .await
+        .context("consultar itens")?;
+
+    let target_root = vault.join("derived/normalized");
+    let mut normalized = 0u64;
+    let mut unsupported: Vec<String> = Vec::new();
+    let mut failures: Vec<String> = Vec::new();
+    let mut with_location = 0u64;
+    let mut losses: std::collections::BTreeMap<Field, (u64, String)> = Default::default();
+
+    for row in &rows {
+        let Ok(hash) = photovault_core::ObjectHash::from_hex(&row.object_hash) else {
+            failures.push(format!("{}: hash inválido no catálogo", row.filename));
+            continue;
+        };
+        let source = store.path_for(&hash);
+
+        let extension = row
+            .filename
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_ascii_lowercase())
+            .unwrap_or_default();
+        let destination = target_root
+            .join(hash.fanout())
+            .join(format!("{}.{extension}", hash.to_hex()));
+
+        let metadata = EmbeddedMetadata {
+            captured_at: row
+                .captured_at
+                .and_then(|epoch| time::OffsetDateTime::from_unix_timestamp(epoch).ok()),
+            location: row
+                .location
+                .and_then(|(lat, lon, alt)| GeoPoint::new(lat, lon, alt).ok()),
+            description: row.description.clone(),
+            people: row
+                .people
+                .iter()
+                .filter_map(|n| PersonName::new(n))
+                .collect(),
+            favorited: row.favorited,
+        };
+
+        match photovault_exif::normalize(&source, &destination, &metadata) {
+            Ok(outcome) => {
+                normalized += 1;
+                if outcome.has_location() {
+                    with_location += 1;
+                }
+                for (field, remedy) in outcome.losses() {
+                    let entry = losses.entry(field).or_insert((0, remedy));
+                    entry.0 += 1;
+                }
+            }
+            Err(ExifError::UnsupportedFormat(extension)) => unsupported.push(extension),
+            Err(error) => failures.push(format!("{}: {error}", row.filename)),
+        }
+    }
+
+    println!("NORMALIZAÇÃO");
+    println!("  itens no catálogo            {:>8}", rows.len());
+    println!("  arquivos normalizados        {:>8}", normalized);
+    println!("  com geolocalização embutida  {:>8}", with_location);
+
+    if !unsupported.is_empty() {
+        let mut kinds: Vec<String> = unsupported.clone();
+        kinds.sort();
+        kinds.dedup();
+        println!(
+            "  sem escrita nativa           {:>8}   ({})",
+            unsupported.len(),
+            kinds.join(", ")
+        );
+    }
+
+    if !losses.is_empty() {
+        println!();
+        println!("NÃO EMBUTIDO");
+        for (field, (count, remedy)) in &losses {
+            println!("  {:>6}  {}", count, field.describe());
+            println!("          {remedy}");
+        }
+        if !photovault_exif::exiftool_available() {
+            println!();
+            println!("  O ExifTool não está instalado. Instale-o para cobrir estes campos:");
+            println!("    sudo apt install libimage-exiftool-perl");
+        }
+    }
+
+    if !failures.is_empty() {
+        println!();
+        println!("FALHAS  {}", failures.len());
+        for failure in failures.iter().take(10) {
+            println!("  {failure}");
+        }
+    }
+
+    catalog
+        .append_audit(
+            "metadata.normalize",
+            None,
+            "ok",
+            Some(&format!("{normalized} arquivos, {with_location} com GPS")),
+        )
+        .await?;
+
+    println!();
+    println!("Os objetos originais não foram modificados (ADR-004).");
     Ok(())
 }
 

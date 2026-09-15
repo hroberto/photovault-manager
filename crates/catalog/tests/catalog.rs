@@ -299,6 +299,7 @@ async fn import_run_records_its_tally() {
         media_without_sidecar: 33,
         bytes_stored: 390_000_000_000,
         failures: 0,
+        relations_linked: 0,
     };
     catalog
         .finish_import(run, &tally)

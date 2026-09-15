@@ -11,10 +11,12 @@
 
 pub mod filename;
 pub mod matcher;
+pub mod relations;
 pub mod sidecar;
 
 pub use filename::MediaKey;
 pub use matcher::{
     match_directory, Match, MatchConfidence, MatchReport, OrphanReason, OrphanSidecar,
 };
+pub use relations::{detect as detect_relations, Relation};
 pub use sidecar::{Sidecar, SidecarError};

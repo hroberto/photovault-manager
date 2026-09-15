@@ -367,6 +367,89 @@ impl Catalog {
         Ok(())
     }
 
+    /// Registra que um item é versão editada de outro.
+    ///
+    /// Não é apenas informação: é o que impede a deduplicação de apagar a foto editada por ela
+    /// ser visualmente quase idêntica à original.
+    pub async fn set_edited_from(&self, edited: MediaId, original: MediaId) -> Result<()> {
+        self.link(edited, original, "edited_from").await
+    }
+
+    /// Registra que um item é o componente de movimento de uma Live Photo.
+    pub async fn set_motion_part_of(&self, motion: MediaId, still: MediaId) -> Result<()> {
+        self.link(motion, still, "motion_part_of").await
+    }
+
+    async fn link(&self, child: MediaId, parent: MediaId, column: &str) -> Result<()> {
+        // Um item não pode ser parente de si mesmo. Acontece quando dois caminhos apontam para
+        // os mesmos bytes e, portanto, para o mesmo item lógico.
+        if child == parent {
+            return Ok(());
+        }
+        // `column` vem de chamadas internas com valores literais, nunca de entrada externa.
+        let sql = format!("UPDATE media SET {column} = ? WHERE id = ? AND {column} IS NULL");
+        sqlx::query(&sql)
+            .bind(parent.get())
+            .bind(child.get())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Itens prontos para normalização, com tudo que precisa ser embutido no arquivo.
+    ///
+    /// Exclui itens já apagados. Devolve também as pessoas, mesmo sabendo que o backend nativo
+    /// não as grava — para que o relatório possa dizer exatamente o que ficou de fora.
+    pub async fn media_for_normalization(
+        &self,
+        limit: Option<i64>,
+    ) -> Result<Vec<records::NormalizationRow>> {
+        let rows = sqlx::query(
+            "SELECT media.id, media.object_hash, media.filename, media.captured_at,
+                    media.description, media.favorited,
+                    media_place.lat, media_place.lon, media_place.altitude
+             FROM media
+             LEFT JOIN media_place ON media_place.media_id = media.id
+             WHERE media.deleted_at IS NULL
+             ORDER BY media.id
+             LIMIT ?",
+        )
+        .bind(limit.unwrap_or(i64::MAX))
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let media_id: i64 = row.get("id");
+            let people: Vec<String> = sqlx::query_scalar(
+                "SELECT person.name FROM person
+                 JOIN person_tag ON person_tag.person_id = person.id
+                 WHERE person_tag.media_id = ?
+                 ORDER BY person.name_key",
+            )
+            .bind(media_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            let lat: Option<f64> = row.get("lat");
+            let lon: Option<f64> = row.get("lon");
+
+            out.push(records::NormalizationRow {
+                media_id,
+                object_hash: row.get("object_hash"),
+                filename: row.get("filename"),
+                captured_at: row.get("captured_at"),
+                description: row.get("description"),
+                favorited: row.get::<i64, _>("favorited") != 0,
+                location: lat
+                    .zip(lon)
+                    .map(|(lat, lon)| (lat, lon, row.get("altitude"))),
+                people,
+            });
+        }
+        Ok(out)
+    }
+
     /// Sidecars que ainda aguardam revisão humana.
     pub async fn pending_orphans(&self) -> Result<Vec<records::OrphanRow>> {
         let rows = sqlx::query(
