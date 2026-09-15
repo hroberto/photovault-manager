@@ -3,13 +3,16 @@
 Cofre de ida e volta para o acervo do Google Fotos: extrai com metadados completos, guarda em
 formato aberto e auditável, e é capaz de devolver ao Google Fotos ou a outro destino.
 
-O plano completo está em `RoadMap.md`. As decisões estão em `docs/adr/`.
+O plano completo está em [RoadMap.md](RoadMap.md). As decisões estão em [docs/adr/](docs/adr/).
+A documentação de uso está no [README](README.md), e a configuração OAuth em
+[docs/oauth.md](docs/oauth.md).
 
 ## Fatos que governam o projeto
 
 Verificados contra a documentação oficial. Não os contradiga sem verificar de novo.
 
-- `mediaItems.list` da biblioteca foi **removido** em 31/03/2025. Não existe listar o acervo.
+- Desde 31/03/2025, `mediaItems.list` só lista conteúdo criado pelo aplicativo; não dá acesso
+  a todo o acervo. Ver [mudanças oficiais](https://developers.google.com/photos/support/updates).
 - Download pela Photos API vem **sem GPS** no EXIF. Por isso o Takeout é a fonte canônica.
 - A **Data Portability API não cobre o Google Fotos**. Não existe export programático.
 - **Não existe API de deleção.** O PhotoVault nunca apaga nada no Google (ADR-012).
@@ -32,18 +35,18 @@ Verificados contra a documentação oficial. Não os contradiga sem verificar de
 
 ## Estrutura
 
-```
+```text
 crates/core/       domínio, sem dependência de Google
 crates/takeout/    parser do Takeout  ← maior risco técnico
-crates/google/     auth, picker, upload, drive
+crates/google/     OAuth parcial, cliente Library API, cota
 crates/exif/       escrita e verificação de metadados embutidos
 crates/cas/        content addressable storage
 crates/catalog/    SQLite + SQLx
 crates/restore/    restauração
-crates/advisor/    análise de limpeza
+crates/advisor/    análise de limpeza (planejado)
 crates/cli/        photovault-cli
-apps/desktop/      Tauri
-frontend/          React + TypeScript
+apps/desktop/      Tauri (planejado)
+frontend/          React + TypeScript (planejado)
 ```
 
 ## Ordem de construção
@@ -56,30 +59,30 @@ importa. Ver `RoadMap.md` seção 40.
 ```bash
 cargo test                          # todos os testes
 cargo test -p photovault-takeout    # só o parser
-cargo clippy --all -- -D warnings   # obrigatório antes de considerar pronto
+cargo clippy --workspace --all-targets -- -D warnings
 cargo run -p photovault-cli -- import-takeout ./Takeout --vault ~/PhotoVault
 cargo run -p photovault-cli -- normalize --vault ~/PhotoVault
 cargo run -p photovault-cli -- verify --sample 2 --vault ~/PhotoVault
 cargo run -p photovault-cli -- orphans --vault ~/PhotoVault
 ```
 
-## Estado atual (V0.3)
+## Estado atual (V0.3 em desenvolvimento)
 
 Pronto e testado: domínio, parser do Takeout, CAS, catálogo, CLI de importação,
 detecção de parentesco, normalização de metadados, cliente da Library API
 (testado contra servidor simulado) e o núcleo da restauração — planejamento,
-orçamento de cota, idempotência e retomada. 249 testes.
+orçamento de cota, idempotência e retomada.
 
-Falta apenas o fio final: ligar o cliente à fila de restauração num comando da
-CLI. Isso exige um Client ID OAuth, que só o usuário pode criar no Google Cloud
-Console (Photos Library API + Photos Picker API, aplicativo para computador).
+Faltam o fluxo OAuth completo, a persistência segura de tokens e a ligação do cliente à fila
+de restauração em um comando da CLI. O Client ID para aplicativo de computador é uma
+configuração externa adicional; o procedimento está no [guia OAuth](docs/oauth.md).
+Photos Library API é necessária para restauração; Picker é uma integração futura separada.
 
-Ainda não iniciados: `crates/advisor` e a interface Tauri (esta também precisa
-de Node, ausente na máquina).
+Ainda não iniciados: `crates/advisor` e a interface Tauri.
 
 Limite conhecido do `crates/exif`: o backend nativo grava EXIF, não XMP. Nomes de pessoas
-e favoritos são reportados como não embutidos, com o remédio (ExifTool). Nunca são
-descartados em silêncio.
+e favoritos são reportados como não embutidos. A CLI detecta a presença do ExifTool, mas ainda
+não o invoca para escrever esses campos. Eles continuam preservados no catálogo.
 
 ## Especialistas
 

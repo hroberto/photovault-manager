@@ -4,6 +4,22 @@
 
 ---
 
+> **Documento de planejamento.** Os fluxos, componentes e comandos abaixo incluem recursos
+> ainda não implementados. Para uso disponível, consulte o [README](README.md). Para preparar
+> o acesso ao Google, consulte o [guia OAuth](docs/oauth.md).
+
+## Sumário
+
+- [Nota desta revisão](#nota-desta-revisão)
+- [Parte I — Enquadramento](#parte-i--enquadramento)
+- [Parte II — Arquitetura](#parte-ii--arquitetura)
+- [Parte III — Exportação](#parte-iii--export-google--photovault)
+- [Parte IV — Restauração](#parte-iv--restore-photovault--google-fotos)
+- [Parte V — Preservação](#parte-v--preservação)
+- [Parte VI — Limpeza assistida](#parte-vi--limpeza-assistida)
+- [Parte VII — Produto](#parte-vii--produto)
+- [Referências](#referências)
+
 ## Nota desta revisão
 
 A revisão 1 partia de três premissas que não se sustentam. Elas foram verificadas contra a
@@ -35,9 +51,9 @@ O expurgo vira consequência, não objetivo: só se apaga com confiança quando 
 
 ---
 
-# Parte I — Enquadramento
+## Parte I — Enquadramento
 
-## 1. Objetivo
+### 1. Objetivo
 
 Gerenciar, inventariar, preservar e restaurar o acervo de fotos e vídeos do Google Fotos,
 mantendo cópia local íntegra, metadados completos e estrutura lógica de álbuns, com capacidade
@@ -51,7 +67,7 @@ Cinco responsabilidades:
 4. **Restauração** — devolver ao Google Fotos ou a outro destino
 5. **Auditoria e limpeza assistida** — saber o que é seguro eliminar
 
-## 2. A realidade das APIs do Google em 2026
+### 2. A realidade das APIs do Google em 2026
 
 Esta seção precisa estar no README desde o primeiro commit, porque tudo depende dela.
 
@@ -83,7 +99,7 @@ Os antigos `photoslibrary.readonly` e `photoslibrary` foram removidos do fluxo e
 **Conclusão arquitetural:** a assimetria é o fato central do projeto. **Sair do Google é difícil
 e manual; voltar para o Google é fácil e programático.** O desenho inteiro decorre disso.
 
-## 3. As duas direções
+### 3. As duas direções
 
 ```text
          ┌──────────────────────────────────────────────┐
@@ -114,9 +130,9 @@ o dono dos dados.
 
 ---
 
-# Parte II — Arquitetura
+## Parte II — Arquitetura
 
-## 4. Stack
+### 4. Stack
 
 | Camada | Tecnologia |
 | --- | --- |
@@ -134,13 +150,13 @@ o dono dos dados.
 | Testes | cargo test, insta, Playwright |
 | Packaging | MSI / DEB / AppImage |
 
-### Por que Rust
+#### Por que Rust
 
 Segurança de memória, performance para hashing de dezenas de milhares de arquivos, concorrência
 previsível, binário nativo, baixo consumo de memória e código robusto para um software que
 manipula dados irrepetíveis. Tauri entrega a experiência de Electron com uma fração do peso.
 
-### Onde o Rust atrapalha, e o que fazer
+#### Onde o Rust atrapalha, e o que fazer
 
 Seja realista: o ecossistema Rust é fraco em três pontos deste projeto.
 
@@ -151,7 +167,7 @@ Seja realista: o ecossistema Rust é fraco em três pontos deste projeto.
 - **CLIP / embeddings.** Exige ONNX Runtime e ~350 MB de modelo no bundle. Plugin opcional, nunca
   no instalador base.
 
-## 5. Arquitetura geral
+### 5. Arquitetura geral
 
 ```text
                      ┌───────────────────────────────┐
@@ -187,7 +203,7 @@ A novidade em relação à revisão 1 é a porta **`MediaSink`**. Ela é a contr
 `MediaSource` e é o que torna a restauração um conceito de primeira classe em vez de um recurso
 avulso.
 
-## 6. Clean / Hexagonal
+### 6. Clean / Hexagonal
 
 ```text
 src/
@@ -224,7 +240,7 @@ src/
     └── tauri/
 ```
 
-## 7. O domínio não conhece o Google
+### 7. O domínio não conhece o Google
 
 Continua valendo, e agora vale nos dois sentidos.
 
@@ -271,9 +287,9 @@ escrita à mão.
 
 ---
 
-# Parte III — EXPORT (Google → PhotoVault)
+## Parte III — EXPORT (Google → PhotoVault)
 
-## 8. Fonte canônica: Takeout
+### 8. Fonte canônica: Takeout
 
 O Takeout é a **única** fonte que entrega o acervo com fidelidade: bytes originais intactos, EXIF
 preservado e um JSON lateral por arquivo com o que o Google sabe além do EXIF.
@@ -313,12 +329,12 @@ Conteúdo típico de um sidecar:
 
 **É daqui que saem geolocalização, pessoas, descrições e favoritos.** Nada disso vem pela API.
 
-## 9. Tornando o Takeout suave
+### 9. Tornando o Takeout suave
 
 O acionamento do export é manual — nenhuma API o dispara. Mas quase todo o resto pode ser
 automatizado, e é aí que o produto se diferencia de mandar o usuário se virar.
 
-### Fluxo do assistente
+#### Fluxo do assistente
 
 ```text
 PASSO 1 — Solicitar
@@ -353,7 +369,7 @@ PASSO 5 — Conciliar
 O caminho (a) é o que transforma a experiência. O Takeout entrega no Drive; o Drive **tem** API.
 Isso elimina o download manual de oito arquivos de 50 GB — que é a parte genuinamente penosa.
 
-### Conciliação de completude
+#### Conciliação de completude
 
 Terminada a ingestão, o PhotoVault precisa responder "faltou alguma coisa?". Sem
 `mediaItems.list` não há contagem oficial, então usa-se triangulação:
@@ -374,14 +390,14 @@ Comparar com:
 
 Divergência acima de um limiar vira alerta, não silêncio.
 
-## 10. O parser de Takeout
+### 10. O parser de Takeout
 
 Este é o componente de maior risco técnico do projeto e merece um crate próprio, corpus de
 fixtures reais e testes de propriedade. Sozinho vale metade da V0.1.
 
 Os problemas reais, que não são hipotéticos:
 
-### Nomes dos sidecars
+#### Nomes dos sidecars
 
 O Google renomeou os sidecars de `IMG_1002.JPG.json` para
 `IMG_1002.JPG.supplemental-metadata.json` e trunca o nome final em torno de 46–51 caracteres,
@@ -406,7 +422,7 @@ Estratégia de casamento, nesta ordem:
 5. Órfão → fila de revisão manual, nunca descartado em silêncio
 ```
 
-### Marcador de duplicata
+#### Marcador de duplicata
 
 O `(1)` fica no nome-base, não no fim:
 
@@ -415,7 +431,7 @@ IMG_1002(1).JPG
 IMG_1002.JPG(1).supplemental-metadata.json     ← observe a posição
 ```
 
-### Outras armadilhas
+#### Outras armadilhas
 
 ```text
 Live Photos           IMG_1002.HEIC + IMG_1002.MP4  → um MediaObject, dois arquivos
@@ -427,7 +443,7 @@ Nomes truncados        arquivos longos cortados de forma diferente do sidecar
 Fusos                  photoTakenTime em UTC, EXIF em hora local sem offset
 ```
 
-### Teste
+#### Teste
 
 ```text
 tests/fixtures/takeout/
@@ -443,7 +459,7 @@ tests/fixtures/takeout/
 
 Nenhum parser entra em produção sem passar nesses fixtures.
 
-## 11. O que cada metadado vira
+### 11. O que cada metadado vira
 
 Esta tabela é o contrato do importador.
 
@@ -471,7 +487,7 @@ Duas observações que importam:
   XMP sem retângulo e como keyword. Isso é lido por Lightroom, digiKam e Immich — ou seja, o dado
   sobrevive fora do Google mesmo sem poder voltar para ele.
 
-## 12. Fonte complementar: Picker API
+### 12. Fonte complementar: Picker API
 
 O Picker resolve o que o Takeout não resolve: **o incremento do dia a dia**. Ninguém vai pedir um
 Takeout de 390 GB toda semana para capturar as 40 fotos novas.
@@ -483,7 +499,7 @@ itens autorizados       →  download  →  catalogação
 
 Serve bem para: lotes recentes, períodos específicos, fotos importantes, migração incremental.
 
-### Mas o Picker é uma fonte degradada
+#### Mas o Picker é uma fonte degradada
 
 Os bytes vêm **sem GPS no EXIF**. As consequências precisam estar no desenho, não descobertas
 depois:
@@ -506,7 +522,7 @@ Tratamento:
    **substitui** o derivado como objeto canônico e o derivado é descartado.
 4. Itens `API_DERIVED` nunca sustentam uma recomendação de expurgo.
 
-## 13. Fidelidade e proveniência
+### 13. Fidelidade e proveniência
 
 ```rust
 enum Fidelity {
@@ -526,7 +542,7 @@ Regra que atravessa o produto inteiro:
 > **Só `Original` é canônico. `ApiDerived` é provisório. `Normalized` é reprodutível e
 > descartável.**
 
-## 14. Content Addressable Storage
+### 14. Content Addressable Storage
 
 ```text
 PhotoVault/
@@ -554,7 +570,7 @@ Mudança em relação à revisão 1: `thumbnails/` saiu de dentro de `repository
 canônico com cache reconstruível estraga qualquer estratégia de backup — o `repository/` deve
 poder ser copiado sozinho, e o `derived/` deve poder ser apagado sem perda.
 
-### Por que CAS
+#### Por que CAS
 
 ```text
 IMG_1002.JPG aparece em:  Viagem Japão, Família, Favoritas, Photos from 2019
@@ -563,7 +579,7 @@ Fisicamente:   1 objeto
 Logicamente:   4 associações
 ```
 
-### A regra que faz o CAS funcionar
+#### A regra que faz o CAS funcionar
 
 > **Objetos no CAS nunca são modificados.**
 
@@ -571,7 +587,7 @@ Se o EXIF corrigido fosse escrito de volta no objeto, o hash mudaria e a identid
 Por isso o enriquecimento (seção 16) **sempre gera uma cópia em `derived/normalized/`**, nunca
 altera o original. Isso é ADR-004.
 
-## 15. Banco de dados
+### 15. Banco de dados
 
 ```sql
 -- Conta -----------------------------------------------------------
@@ -723,7 +739,7 @@ CREATE TABLE audit_log (
 O encadeamento do `audit_log` é barato e é o que transforma "registro" em "prova". Sem ele, um
 log de auditoria não demonstra nada.
 
-## 16. Normalização: sidecar → arquivo
+### 16. Normalização: sidecar → arquivo
 
 Este é o passo que dá valor duradouro ao acervo e que **viabiliza a restauração**.
 
@@ -753,9 +769,9 @@ Para vídeos, a escrita de metadados é mais limitada. Grava-se o que o contêin
 
 ---
 
-# Parte IV — RESTORE (PhotoVault → Google Fotos)
+## Parte IV — RESTORE (PhotoVault → Google Fotos)
 
-## 17. O que volta, e o que não volta
+### 17. O que volta, e o que não volta
 
 Nenhuma tela de restauração deve começar antes que esta tabela esteja implementada como código
 (`SinkCapabilities`) e exibida ao usuário.
@@ -785,7 +801,7 @@ A geolocalização voltar é o ponto não óbvio e é o que torna o recurso viá
 o EXIF dos arquivos que recebe, então basta que o passo de normalização (seção 16) tenha
 embutido o `geoData` no arquivo antes do envio.
 
-## 18. Pipeline de restauração
+### 18. Pipeline de restauração
 
 ```text
 RestorePlan
@@ -826,7 +842,7 @@ relatório de restauração + entrada no audit_log
 O escopo `photoslibrary.readonly.appcreateddata` permite reler o que o próprio app enviou. É
 assim que a restauração se verifica em vez de assumir sucesso.
 
-## 19. Álbuns
+### 19. Álbuns
 
 ```rust
 // 1. criar
@@ -845,7 +861,7 @@ Duas limitações a expor na UI:
   estrutura, não a mescla.
 - A capa do álbum não é definível via API. O Google escolhe.
 
-## 20. Limites operacionais
+### 20. Limites operacionais
 
 Estes números determinam o desenho, não são nota de rodapé.
 
@@ -859,7 +875,7 @@ Arquivos > 25 MB         contam na cota de armazenamento da conta
 Erro de cota             429 → backoff exponencial
 ```
 
-### A conta que precisa aparecer na tela
+#### A conta que precisa aparecer na tela
 
 Para um acervo de 48.231 fotos e 3.921 vídeos:
 
@@ -885,7 +901,7 @@ Consequências de projeto, todas obrigatórias:
 4. **Aviso de armazenamento.** Reenviar 390 GB consome 390 GB da cota do Google **de novo** se os
    originais ainda estiverem lá. Este aviso precisa ser intransponível na tela de confirmação.
 
-## 21. Idempotência e anti-duplicata
+### 21. Idempotência e anti-duplicata
 
 Um job de seis dias vai ser interrompido. Reiniciar não pode significar reenviar.
 
@@ -911,7 +927,7 @@ caminho — não há como listar a biblioteca. Portanto a proteção contra dupl
 responsabilidade do catálogo local. Isso precisa estar documentado, porque é uma forma de o
 usuário se machucar.
 
-## 22. Para que serve a restauração
+### 22. Para que serve a restauração
 
 Vale enumerar, porque justifica o esforço:
 
@@ -934,9 +950,9 @@ periodicamente e alimentar o indicador de saúde do cofre.
 
 ---
 
-# Parte V — Preservação
+## Parte V — Preservação
 
-## 23. Estados e integridade
+### 23. Estados e integridade
 
 Não marcar `BACKED_UP = true` só porque o download terminou.
 
@@ -954,7 +970,7 @@ integridade local, e a interface precisa dizer exatamente isso. Prometer mais se
 O que substitui a verificação contra o Google é a **verificação por restauração** (seção 22): a
 prova de que o acervo está bom é conseguir devolvê-lo.
 
-## 24. Regra fundamental
+### 24. Regra fundamental
 
 Nunca:
 
@@ -970,7 +986,7 @@ verificação de redundância → (opcional) restauração de amostra →
 só então: candidato a expurgo
 ```
 
-## 25. Jobs
+### 25. Jobs
 
 Toda operação longa é um job persistido no SQLite, retomável após desligamento.
 
@@ -990,7 +1006,7 @@ Estados:
 Reabrir o aplicativo retoma exatamente de onde parou. Isso não é um refinamento: com jobs de seis
 dias, é requisito.
 
-## 26. Performance
+### 26. Performance
 
 ```text
               ┌─ worker 1 ─┐
@@ -1015,7 +1031,7 @@ arquivo   BLAKE3 + SHA-256 incrementais
 
 Download e hash no mesmo passo, uma leitura só.
 
-## 27. Deduplicação
+### 27. Deduplicação
 
 ```text
 Nível 1  hash exato (BLAKE3)
@@ -1037,7 +1053,7 @@ Nível 4  embeddings (CLIP)
 O nível 2 subiu de prioridade nesta revisão: ele deixou de ser refinamento e virou requisito de
 correção, por causa da assimetria de bytes entre as duas fontes.
 
-## 28. Hashing
+### 28. Hashing
 
 ```text
 BLAKE3    identidade interna do CAS, por velocidade
@@ -1047,7 +1063,7 @@ SHA-256   calculado sob demanda, para manifestos e interoperabilidade
 Revisão 1 calculava os dois sempre. Não se justifica: não há hash de referência remoto para
 comparar, então o SHA-256 só importa quando o acervo sai do PhotoVault.
 
-## 29. Redundância 3-2-1
+### 29. Redundância 3-2-1
 
 ```text
 Backup Health
@@ -1064,7 +1080,10 @@ Status: PROTEGIDO
 
 A linha da restauração de amostra é o que diferencia este painel de um indicador decorativo.
 
-## 30. Credenciais
+### 30. Credenciais
+
+**Planejado:** a implementação atual só tem armazenamento de tokens em memória para testes.
+O [guia OAuth](docs/oauth.md) separa a configuração externa das etapas ainda pendentes.
 
 Nunca em texto aberto.
 
@@ -1080,7 +1099,7 @@ cifrado com chave derivada de senha mestra (Argon2id), escolhido explicitamente 
 
 O banco guarda `credential_reference`, nunca o `refresh_token`.
 
-## 31. SQLite
+### 31. SQLite
 
 ```sql
 PRAGMA journal_mode = WAL;
@@ -1093,9 +1112,9 @@ Migrações versionadas com `sqlx::migrate!`, nunca criação implícita de sche
 
 ---
 
-# Parte VI — Limpeza assistida
+## Parte VI — Limpeza assistida
 
-## 32. Cleanup Advisor, não Cleanup Executor
+### 32. Cleanup Advisor, não Cleanup Executor
 
 A Google não oferece deleção programática. Insistir em "expurgo" como pilar do produto é prometer
 o que não se pode entregar. O componente é rebaixado e renomeado.
@@ -1116,7 +1135,7 @@ Apagar nada da conta do usuário.
 A separação entre `AdvisoryEngine` e um eventual `CleanupExecutor` continua sendo a decisão mais
 importante desta área: o motor mantém valor integral mesmo que a Google nunca abra a API.
 
-## 33. Relatório de oportunidade
+### 33. Relatório de oportunidade
 
 ```text
 Oportunidade de limpeza
@@ -1141,7 +1160,7 @@ Cada item traz o `google_url` do sidecar, que abre a foto exata no Google Fotos.
 em lote pela interface da Google; o PhotoVault registra a intenção, a janela de segurança e o
 resultado no `audit_log` encadeado.
 
-## 34. Janela de segurança
+### 34. Janela de segurança
 
 ```text
 candidato  →  0 / 7 / 15 / 30 dias  →  elegível
@@ -1149,7 +1168,7 @@ candidato  →  0 / 7 / 15 / 30 dias  →  elegível
 
 Nenhum item vira elegível no mesmo dia em que é identificado, exceto por escolha explícita.
 
-## 35. Pré-condição absoluta
+### 35. Pré-condição absoluta
 
 ```text
 Um item só é sugerido para eliminação se:
@@ -1164,9 +1183,9 @@ Itens `ApiDerived` nunca são sugeridos, porque lhes falta a geolocalização.
 
 ---
 
-# Parte VII — Produto
+## Parte VII — Produto
 
-## 36. Tela principal
+### 36. Tela principal
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
@@ -1192,7 +1211,7 @@ Itens `ApiDerived` nunca são sugeridos, porque lhes falta a geolocalização.
 "Pessoas" e "Lugares" viram seções de primeira classe — são exatamente os metadados que só o
 Takeout entrega e que dão ao PhotoVault algo que a API jamais daria.
 
-## 37. Tela de restauração
+### 37. Tela de restauração
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
@@ -1223,7 +1242,7 @@ Takeout entrega e que dão ao PhotoVault algo que a API jamais daria.
 Todo o conteúdo dos dois blocos do meio é gerado a partir de `SinkCapabilities`. Nada é texto
 fixo — quando a Google mudar a API, a tela muda sozinha.
 
-## 38. Repositório
+### 38. Repositório
 
 ```text
 photovault/
@@ -1246,7 +1265,7 @@ photovault/
 └── README.md
 ```
 
-## 39. ADRs
+### 39. ADRs
 
 ```text
 ADR-001  Rust como linguagem principal
@@ -1265,28 +1284,31 @@ ADR-013  Metadados embutidos nos arquivos, não apenas no banco
 ADR-014  Nenhuma automação de navegador
 ```
 
-## 40. Releases
+### 40. Releases
 
 A mudança principal em relação à revisão 1: **a interface vem depois da confiança nos dados**, e
 a restauração sobe de prioridade porque é o que valida o produto inteiro.
 
-### V0.1 — Ingestão (CLI, sem interface)
+#### V0.1 — Ingestão (CLI, sem interface)
 
 ```text
 photovault import-takeout ./Takeout --vault ~/PhotoVault
 photovault status
-photovault report --orphans
+photovault orphans
 ```
 
 Parser de Takeout com fixtures, CAS, SQLite, catálogo completo com geo, pessoas e álbuns.
 Ataca primeiro o maior risco técnico. Se o parser não for confiável, nada mais importa.
 
-### V0.2 — Integridade e normalização
+#### V0.2 — Integridade e normalização
 
 Hash, verificação por releitura, deduplicação por hash exato e visual, normalização
 sidecar → EXIF/XMP, manifestos, auditoria encadeada.
 
-### V0.3 — Restauração (ainda CLI)
+#### V0.3 — Restauração (ainda CLI)
+
+**Comandos propostos; ainda indisponíveis.** O núcleo existe, mas faltam autenticação OAuth
+completa, armazenamento seguro de tokens e execução pela CLI.
 
 ```text
 photovault restore --album "Viagem Japão" --to google --dry-run
@@ -1297,26 +1319,26 @@ photovault restore --sample 20 --to google
 OAuth, upload, batchCreate, álbuns, idempotência, rate limiter, verificação.
 **Aqui o produto passa a provar que funciona.**
 
-### V0.4 — Interface
+#### V0.4 — Interface
 
 Tauri e React sobre um núcleo já confiável: painel, galeria, álbuns, pessoas, lugares,
 assistente de importação, tela de restauração.
 
-### V0.5 — Incremental
+#### V0.5 — Incremental
 
 Picker API, integração com o Drive para coleta automática dos archives, watcher de pasta,
 conciliação de completude.
 
-### V0.6 — Advisor
+#### V0.6 — Advisor
 
 Análise de armazenamento, candidatos, risco, relatório, janela de segurança, deep links.
 
-### Depois
+#### Depois
 
 Hash perceptual, mapa, linha do tempo, outros `MediaSink` (Immich, Nextcloud, S3), busca
 semântica local, reconhecimento facial local e opcional.
 
-## 41. Riscos conhecidos
+### 41. Riscos conhecidos
 
 | Risco | Impacto | Mitigação |
 | --- | --- | --- |
@@ -1330,7 +1352,7 @@ semântica local, reconhecimento facial local e opcional.
 | Secret Service ausente em Linux | baixo | fallback com senha mestra |
 | Escopo grande demais para um projeto pessoal | alto | CLI antes de UI; cada release entrega algo utilizável |
 
-## 42. Princípios
+### 42. Princípios
 
 1. O acervo é do usuário; o Google é apenas um dos destinos.
 2. O original nunca é modificado.

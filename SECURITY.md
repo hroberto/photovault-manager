@@ -1,5 +1,7 @@
 # Segurança
 
+[Índice da documentação](docs/README.md) · [Configuração OAuth](docs/oauth.md)
+
 ## Modelo de ameaça
 
 O PhotoVault é um aplicativo local que guarda o acervo pessoal completo de alguém e detém
@@ -15,19 +17,26 @@ sofisticado. É, em ordem de probabilidade:
 As defesas seguem essa ordem. Não adianta proteger contra ameaças exóticas enquanto um token
 puder aparecer num log.
 
-## Decisões estruturais
+## Controles implementados
 
-- **Credenciais nunca em texto aberto.** O catálogo guarda uma referência; o token vive no
-  chaveiro do sistema operacional. Em Linux sem Secret Service — servidor, NAS, contêiner — há
-  fallback com arquivo cifrado por senha mestra derivada com Argon2id.
-- **OAuth com PKCE e loopback.** Sem `client_secret` embarcado, porque em aplicativo de
-  computador ele não é segredo. Sem webview capturando a senha do usuário: a credencial do
-  Google é digitada no navegador do Google.
+- **PKCE e URL de autorização.** O módulo OAuth gera o desafio e monta a URL com `state`
+  fornecido por quem chama. O fluxo completo ainda não está integrado à CLI.
 - **Segredos não aparecem em log.** `PkceChallenge` e `TokenSet` têm `Debug` implementado à mão
   para imprimir `<oculto>`, e há testes que falham se um segredo vazar na saída de depuração.
-- **Entrada não confiável.** Um archive do Takeout é entrada não confiável: o extrator precisa
-  rejeitar caminhos com `../` (*zip slip*) e limitar a razão de expansão (*zip bomb*).
 - **`#![forbid(unsafe_code)]`** em todos os crates.
+
+## Requisitos para as próximas integrações
+
+- **Credenciais nunca em texto aberto.** O catálogo prevê uma referência à credencial.
+  `TokenStore` define a interface de armazenamento, mas só existe implementação em memória
+  para testes. O chaveiro do sistema e o fallback cifrado com Argon2id ainda estão planejados.
+- **OAuth com navegador e loopback.** Faltam o receptor local, a geração e validação de `state`,
+  a troca do código e a renovação de tokens. O fluxo deve usar o navegador do sistema, conforme
+  o [guia OAuth](docs/oauth.md).
+- **Entrada não confiável.** A CLI recebe o Takeout já extraído. Um futuro extrator integrado
+  deve rejeitar caminhos com `../` (*zip slip*) e limitar a expansão (*zip bomb*).
+
+Os controles planejados acima não devem ser tratados como proteção já disponível.
 
 ## Auditoria de dependências
 

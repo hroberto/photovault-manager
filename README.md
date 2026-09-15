@@ -1,10 +1,22 @@
 # PhotoVault Manager
 
-Um cofre de ida e volta para o acervo do Google Fotos: extrai com metadados completos, guarda em
-formato aberto e auditável, e é capaz de **devolver** ao Google Fotos — ou a qualquer outro
-destino.
+![Ilustração do PhotoVault Manager: fotos saem do Google Fotos pelo Takeout, entram num cofre e voltam para os dispositivos do usuário](photovault-manager-preview.png)
+
+Um cofre local para preservar o acervo do Google Fotos em formato aberto e auditável, com
+restauração para o Google Fotos planejada. A CLI já importa exportações do Takeout, verifica
+integridade e normaliza metadados; a autenticação e o envio ainda precisam ser integrados.
 
 > O código, os comentários e a documentação estão em português, que é a língua do projeto.
+
+## Navegação
+
+- [Estado do projeto](#estado)
+- [Instalação e uso](#uso)
+- [Autenticação via OAuth](#autenticação-via-oauth)
+- [Desenvolvimento](#desenvolvimento)
+- [Índice da documentação](docs/README.md)
+- [Roadmap](RoadMap.md)
+- [Segurança](SECURITY.md)
 
 ---
 
@@ -26,6 +38,9 @@ premissas que não valem mais. Os fatos verificados contra a documentação ofic
 | Marcar pessoas ou favoritos | **Não existe** |
 | Apagar da biblioteca | **Não existe** |
 
+Veja as [mudanças das APIs do Google Fotos](https://developers.google.com/photos/support/updates)
+e os [escopos de autorização](https://developers.google.com/photos/overview/authorization).
+
 Daí decorre a assimetria que organiza o projeto inteiro:
 
 > **Sair do Google é manual e difícil. Voltar para o Google é programático e fácil.**
@@ -37,14 +52,17 @@ no arquivo, antes de enviar, o `geoData` que o Takeout entregou no JSON lateral.
 para a data de captura.
 
 O que não volta são nomes de pessoas e marcações de favorito, porque não há API para isso. O
-PhotoVault preserva ambos em XMP dentro do arquivo, de modo que sobrevivem para Lightroom,
-digiKam e Immich mesmo que o Google não os aceite de volta.
+PhotoVault preserva ambos no catálogo. A escrita em XMP está planejada para que também
+viajem dentro dos arquivos. Hoje, `normalize` grava EXIF e informa os campos não embutidos;
+instalar o ExifTool ainda não ativa uma integração de escrita automática.
 
 ---
 
 ## Estado
 
-**V0.3** — 249 testes, `clippy -D warnings` limpo.
+**V0.3 em desenvolvimento.** O núcleo de restauração existe, mas ainda não há restauração
+executável pela CLI. Os marcos V0.x do roadmap são etapas de entrega; a versão declarada no
+workspace Cargo é `0.1.0`.
 
 | Componente | Estado |
 | --- | --- |
@@ -53,14 +71,15 @@ digiKam e Immich mesmo que o Google não os aceite de volta.
 | `crates/cas` — armazenamento endereçado por conteúdo | pronto |
 | `crates/catalog` — SQLite com SQLx | pronto |
 | `crates/exif` — metadados embutidos | pronto |
-| `crates/google` — Library API, OAuth, cota | pronto, testado contra servidor simulado |
+| `crates/google` — Library API, OAuth, cota | cliente testado com servidor simulado; OAuth parcial |
 | `crates/restore` — planejamento, idempotência, retomada | núcleo pronto |
 | `crates/cli` — `photovault` | importação, verificação, normalização |
 | `crates/advisor` — análise de limpeza | não iniciado |
 | interface Tauri | não iniciada |
 
-O que falta para a primeira restauração real é um Client ID OAuth, que só o dono da conta pode
-criar.
+Para a primeira restauração real, faltam a configuração de um cliente OAuth no Google Cloud,
+o fluxo completo de autorização, a persistência segura de tokens e a ligação entre o cliente
+Google e a fila de restauração na CLI. Veja o [guia de OAuth](docs/oauth.md).
 
 ---
 
@@ -69,7 +88,7 @@ criar.
 O Takeout não tem especificação e o formato muda sem aviso. Estas armadilhas são tratadas com
 fixtures e testes, não com suposições:
 
-```
+```text
 IMG_1002.JPG.supplemental-metadata.json     formato atual
 IMG_1002.JPG.supplemental-metadat.json      truncado
 IMG_1002.JPG.supple.json                    truncado em outro ponto
@@ -109,39 +128,68 @@ ameaça e os avisos de segurança avaliados estão em [`SECURITY.md`](SECURITY.m
 
 ## Uso
 
-Requer Rust estável.
+### Compilar
+
+Requer a toolchain Rust estável, conforme [rust-toolchain.toml](rust-toolchain.toml).
+Execute os comandos na raiz do repositório.
 
 ```bash
-cargo build --release
+cargo build --release -p photovault-cli
+./target/release/photovault --help
+```
 
-# 1. Solicite o export em takeout.google.com (só Fotos) e extraia o archive.
-photovault import-takeout ./Takeout --vault ~/PhotoVault --label "archive 1 de 8"
+O build gera `target/release/photovault`; ele não instala o comando no `PATH`. Os exemplos
+abaixo usam esse caminho. Para instalar o binário, use `cargo install --path crates/cli --locked`
+e mantenha o diretório de binários do Cargo no `PATH`.
+
+### Importar e verificar
+
+Solicite a exportação no [Google Takeout](https://takeout.google.com/), selecionando apenas o
+Google Fotos. Baixe e extraia os arquivos antes de importar. Esse fluxo local **não exige OAuth**.
+
+```bash
+# 1. Importe o diretório extraído; repita para cada parte da exportação.
+./target/release/photovault import-takeout ./Takeout --vault ~/PhotoVault --label "arquivo 1 de 8"
 
 # 2. Veja o que entrou.
-photovault status --vault ~/PhotoVault
+./target/release/photovault status --vault ~/PhotoVault
 
 # 3. Confira a integridade dos bytes em disco.
-photovault verify --vault ~/PhotoVault
-photovault verify --sample 2 --vault ~/PhotoVault    # scrub periódico
+./target/release/photovault verify --vault ~/PhotoVault
+./target/release/photovault verify --sample 2 --vault ~/PhotoVault
 
 # 4. Grave os metadados dentro de cópias dos arquivos.
-#    Sem isso a geolocalização não volta ao Google.
-photovault normalize --vault ~/PhotoVault
+./target/release/photovault normalize --vault ~/PhotoVault
 
 # 5. Reveja o que não casou. Nada foi descartado.
-photovault orphans --vault ~/PhotoVault
+./target/release/photovault orphans --vault ~/PhotoVault
 ```
+
+`verify --sample 2` verifica uma amostra de aproximadamente 2% dos objetos. Para experimentar
+a normalização em poucos itens, use `normalize --limit 10`. Confira o relatório de campos
+não embutidos e formatos sem suporte antes de considerar a normalização completa.
 
 ### Estrutura do cofre
 
-```
+```text
 PhotoVault/
 ├── repository/objects/     bytes originais, imutáveis, endereçados por BLAKE3
 ├── derived/normalized/     cópias com metadados embutidos — descartável e reprodutível
 └── database/photovault.db  catálogo
 ```
 
-`repository/` pode ser copiado sozinho. `derived/` pode ser apagado sem perda.
+`repository/` contém os bytes originais. Para preservar também associações, álbuns e metadados
+do catálogo, copie `database/` com o aplicativo fechado. `derived/` pode ser regenerado a partir
+dos originais e do catálogo.
+
+## Autenticação via OAuth
+
+**Ainda não existe comando de login ou restauração na CLI.** Criar credenciais no Google Cloud
+prepara a configuração externa, mas não habilita esses recursos nesta versão.
+
+O [guia de OAuth](docs/oauth.md) explica como criar o projeto, configurar o consentimento,
+obter um Client ID para aplicativo de computador e escolher os escopos. Também descreve o
+fluxo PKCE com retorno local e as etapas que faltam implementar.
 
 ---
 
@@ -150,7 +198,7 @@ PhotoVault/
 ```bash
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all
+cargo fmt --all --check
 cargo audit                                          # exige cargo-audit
 ```
 
