@@ -1,0 +1,22 @@
+# Avisos de segurança avaliados e aceitos conscientemente.
+#
+# Cada entrada aqui é uma decisão, não um silenciamento. A justificativa e a data de revisão
+# estão em SECURITY.md. Um aviso novo que não esteja nesta lista continua derrubando o CI —
+# que é exatamente o comportamento desejado.
+
+[advisories]
+ignore = [
+    # quick-xml 0.37.5 — negação de serviço por exaustão de memória e por tempo quadrático ao
+    # analisar XMP malformado. Chega até nós pelo little_exif 0.6.23, que é a última versão
+    # publicada e trava em quick-xml 0.37; a correção está em 0.41+, semver-incompatível.
+    # Sem caminho de atualização. Impacto avaliado como baixo neste contexto: derruba o
+    # importador, não corrompe o cofre. Ver SECURITY.md.
+    "RUSTSEC-2026-0195",
+    "RUSTSEC-2026-0194",
+
+    # rsa 0.9.10 — ataque Marvin por canal lateral de temporização. Consta do Cargo.lock por
+    # ser dependência opcional do sqlx-mysql, que este projeto não habilita: usamos apenas o
+    # backend SQLite. Verificado com `cargo tree -i rsa` (não aparece em nenhum grafo) e pela
+    # ausência de artefatos `librsa` em target/. Nunca é compilado.
+    "RUSTSEC-2023-0071",
+]

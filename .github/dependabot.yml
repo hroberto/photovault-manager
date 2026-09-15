@@ -1,0 +1,30 @@
+version: 2
+
+updates:
+  # Dependências Rust do workspace inteiro.
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Sem agrupamento, um workspace com oito crates gera dezenas de PRs por semana e o ruído
+    # faz com que nenhum seja lido. Correções de segurança continuam vindo separadas.
+    groups:
+      patches:
+        update-types: [patch]
+      minors:
+        update-types: [minor]
+    commit-message:
+      prefix: "deps"
+
+  # É este bloco que torna o pin por SHA sustentável: sem ele, as ações ficariam congeladas
+  # para sempre na versão do dia em que foram fixadas — inclusive nas falhas de segurança.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"

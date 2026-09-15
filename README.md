@@ -102,7 +102,8 @@ num acervo irrepetível.
 5. O que não é possível é dito na tela, não descoberto pelo usuário.
 6. Um backup que nunca foi restaurado não é um backup.
 
-As decisões estão registradas em [`docs/adr/`](docs/adr/), com contexto e custo.
+As decisões estão registradas em [`docs/adr/`](docs/adr/), com contexto e custo. O modelo de
+ameaça e os avisos de segurança avaliados estão em [`SECURITY.md`](SECURITY.md).
 
 ---
 
@@ -150,7 +151,12 @@ PhotoVault/
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
+cargo audit                                          # exige cargo-audit
 ```
+
+O CI roda os quatro a cada push, e a auditoria também **semanalmente por agendamento** — o risco
+real é uma CVE divulgada contra uma dependência que não mudou, e ela não seria notada se a
+auditoria só rodasse quando alguém empurra código.
 
 O crate `takeout` é o de maior risco técnico do projeto. Toda variação encontrada em um archive
 real deve virar fixture **antes** de virar correção de código.

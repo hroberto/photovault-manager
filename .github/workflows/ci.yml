@@ -2,8 +2,23 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
+  schedule:
+    # A auditoria precisa rodar sem depender de alguém empurrar código: o risco real é uma CVE
+    # divulgada contra uma dependência que não mudou. Segundas, 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+# Privilégio mínimo. Sem isto, o GITHUB_TOKEN herda o padrão do repositório, que pode ser
+# escrita em tudo. Nenhum job aqui precisa escrever nada.
+permissions:
+  contents: read
+
+# Um push novo cancela a execução anterior do mesmo branch. Em `main` não cancela, para que o
+# histórico de CI da linha principal fique completo.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,17 +27,23 @@ env:
 jobs:
   test:
     name: Testes e lint
-    runs-on: ubuntu-latest
+    # Fixo em vez de `ubuntu-latest`: reprodutibilidade. O custo é que a subida para a próxima
+    # imagem do Ubuntu passa a ser manual — o Dependabot não atualiza rótulo de runner.
+    runs-on: ubuntu-24.04
+    # Ações fixadas por SHA de commit, não por tag. Uma tag pode ser movida para código
+    # malicioso sem que nada aqui mude; um SHA, não. O Dependabot avisa quando ficarem para
+    # trás — é o par que torna o pin sustentável.
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Instalar toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
       - name: Formatação
         run: cargo fmt --all --check
@@ -33,7 +54,26 @@ jobs:
       - name: Testes
         run: cargo test --workspace
 
-      # O parser do Takeout é o componente de maior risco do projeto: se ele não for
-      # confiável, nada mais importa. Roda isolado para que a falha fique óbvia no log.
+      # O parser do Takeout é o componente de maior risco do projeto: se ele não for confiável,
+      # nada mais importa. Roda isolado para que a falha fique óbvia no log em vez de se perder
+      # entre centenas de testes.
       - name: Parser do Takeout (isolado)
         run: cargo test -p photovault-takeout -- --nocapture
+
+  audit:
+    name: Auditoria de dependências
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # Binário pré-compilado: segundos, contra os dois minutos de `cargo install cargo-audit`.
+      - name: Instalar cargo-audit
+        uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2
+        with:
+          tool: cargo-audit
+
+      # Falhar é a notificação: uma execução agendada que falha avisa por e-mail, com a mesma
+      # informação que uma issue e sem exigir `issues: write` para o token.
+      - name: Auditar
+        run: cargo audit
