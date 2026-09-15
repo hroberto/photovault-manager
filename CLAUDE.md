@@ -63,13 +63,19 @@ cargo run -p photovault-cli -- verify --sample 2 --vault ~/PhotoVault
 cargo run -p photovault-cli -- orphans --vault ~/PhotoVault
 ```
 
-## Estado atual (V0.2)
+## Estado atual (V0.3)
 
 Pronto e testado: domínio, parser do Takeout, CAS, catálogo, CLI de importação,
-detecção de parentesco e normalização de metadados. 175 testes.
+detecção de parentesco, normalização de metadados, cliente da Library API
+(testado contra servidor simulado) e o núcleo da restauração — planejamento,
+orçamento de cota, idempotência e retomada. 249 testes.
 
-Pendente por depender de credenciais OAuth que só o usuário pode criar: `crates/google`
-(Picker, upload, Drive), `crates/restore`, `crates/advisor`, interface Tauri.
+Falta apenas o fio final: ligar o cliente à fila de restauração num comando da
+CLI. Isso exige um Client ID OAuth, que só o usuário pode criar no Google Cloud
+Console (Photos Library API + Photos Picker API, aplicativo para computador).
+
+Ainda não iniciados: `crates/advisor` e a interface Tauri (esta também precisa
+de Node, ausente na máquina).
 
 Limite conhecido do `crates/exif`: o backend nativo grava EXIF, não XMP. Nomes de pessoas
 e favoritos são reportados como não embutidos, com o remédio (ExifTool). Nunca são

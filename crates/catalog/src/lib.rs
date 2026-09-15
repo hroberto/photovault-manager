@@ -21,7 +21,10 @@ use sqlx::{Row, SqlitePool};
 
 pub mod records;
 
-pub use records::{AlbumId, CatalogStats, ImportRunId, ImportTally, NewMedia, PersonId};
+pub use records::{
+    AlbumId, CatalogStats, ImportRunId, ImportTally, NewMedia, PersonId, RestoreItemRow,
+    RestoreRunId,
+};
 
 /// Falha ao operar sobre o catálogo.
 #[derive(Debug, thiserror::Error)]
@@ -473,6 +476,197 @@ impl Catalog {
                     .unwrap_or_default(),
             })
             .collect())
+    }
+
+    // -- Restauração ---------------------------------------------------------
+
+    /// Abre uma restauração.
+    pub async fn begin_restore(
+        &self,
+        sink: &str,
+        dry_run: bool,
+        items_total: u64,
+        bytes_total: u64,
+        requests_estimated: u64,
+    ) -> Result<RestoreRunId> {
+        let id = sqlx::query(
+            "INSERT INTO restore_run
+                (sink, started_at, status, dry_run, items_total, bytes_total, requests_estimated)
+             VALUES (?, ?, 'running', ?, ?, ?, ?)
+             RETURNING id",
+        )
+        .bind(sink)
+        .bind(now())
+        .bind(i64::from(dry_run))
+        .bind(items_total as i64)
+        .bind(bytes_total as i64)
+        .bind(requests_estimated as i64)
+        .fetch_one(&self.pool)
+        .await?
+        .get::<i64, _>("id");
+        Ok(RestoreRunId(id))
+    }
+
+    /// Enfileira um item numa restauração.
+    ///
+    /// Devolve `false` quando a chave de idempotência já existe — isto é, quando o item já foi
+    /// enviado para esta conta, nesta ou em outra execução. É a única proteção contra duplicar
+    /// itens na biblioteca, porque não há API para listar o que já está lá.
+    pub async fn enqueue_restore_item(
+        &self,
+        run: RestoreRunId,
+        media: MediaId,
+        idempotency_key: &str,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            "INSERT INTO restore_item
+                (restore_run_id, media_id, idempotency_key, status, updated_at)
+             VALUES (?, ?, ?, 'pending', ?)
+             ON CONFLICT(idempotency_key) DO NOTHING",
+        )
+        .bind(run.0)
+        .bind(media.get())
+        .bind(idempotency_key)
+        .bind(now())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Itens de uma restauração que ainda não subiram.
+    pub async fn pending_restore_items(&self, run: RestoreRunId) -> Result<Vec<RestoreItemRow>> {
+        let rows = sqlx::query(
+            "SELECT restore_item.media_id, restore_item.idempotency_key,
+                    restore_item.remote_media_id, restore_item.status, restore_item.attempts,
+                    media.object_hash, media.filename, media.description
+             FROM restore_item
+             JOIN media ON media.id = restore_item.media_id
+             WHERE restore_item.restore_run_id = ?
+               AND restore_item.remote_media_id IS NULL
+               AND restore_item.status != 'skipped'
+             ORDER BY restore_item.media_id",
+        )
+        .bind(run.0)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| RestoreItemRow {
+                media_id: row.get("media_id"),
+                object_hash: row.get("object_hash"),
+                filename: row.get("filename"),
+                description: row.get("description"),
+                idempotency_key: row.get("idempotency_key"),
+                remote_media_id: row.get("remote_media_id"),
+                status: row.get("status"),
+                attempts: row.get("attempts"),
+            })
+            .collect())
+    }
+
+    /// Registra que os bytes de um item subiram.
+    pub async fn mark_uploaded(
+        &self,
+        run: RestoreRunId,
+        media: MediaId,
+        upload_token: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE restore_item
+             SET status = 'uploaded', upload_token = ?, updated_at = ?
+             WHERE restore_run_id = ? AND media_id = ?",
+        )
+        .bind(upload_token)
+        .bind(now())
+        .bind(run.0)
+        .bind(media.get())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Registra que o item foi criado no destino.
+    ///
+    /// O identificador remoto é gravado na mesma transação em que o item é marcado como criado.
+    /// Gravá-lo depois abriria uma janela em que uma queda faria o item ser reenviado.
+    pub async fn mark_created(
+        &self,
+        run: RestoreRunId,
+        media: MediaId,
+        remote_id: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE restore_item
+             SET status = 'created', remote_media_id = ?, updated_at = ?
+             WHERE restore_run_id = ? AND media_id = ?",
+        )
+        .bind(remote_id)
+        .bind(now())
+        .bind(run.0)
+        .bind(media.get())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE restore_run SET items_done = items_done + 1 WHERE id = ?")
+            .bind(run.0)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Registra uma falha num item.
+    pub async fn mark_restore_failed(
+        &self,
+        run: RestoreRunId,
+        media: MediaId,
+        error: &str,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE restore_item
+             SET status = 'failed', attempts = attempts + 1, last_error = ?, updated_at = ?
+             WHERE restore_run_id = ? AND media_id = ?",
+        )
+        .bind(error)
+        .bind(now())
+        .bind(run.0)
+        .bind(media.get())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query("UPDATE restore_run SET items_failed = items_failed + 1 WHERE id = ?")
+            .bind(run.0)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Fecha uma restauração com o estado final.
+    pub async fn finish_restore(&self, run: RestoreRunId, status: &str) -> Result<()> {
+        sqlx::query("UPDATE restore_run SET status = ?, finished_at = ? WHERE id = ?")
+            .bind(status)
+            .bind(now())
+            .bind(run.0)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Contagens de uma restauração.
+    pub async fn restore_progress(&self, run: RestoreRunId) -> Result<(u64, u64, u64)> {
+        let row = sqlx::query(
+            "SELECT items_total, items_done, items_failed FROM restore_run WHERE id = ?",
+        )
+        .bind(run.0)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.get::<i64, _>("items_total") as u64,
+            row.get::<i64, _>("items_done") as u64,
+            row.get::<i64, _>("items_failed") as u64,
+        ))
     }
 
     // -- Auditoria -----------------------------------------------------------

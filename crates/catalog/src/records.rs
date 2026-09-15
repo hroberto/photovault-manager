@@ -119,6 +119,45 @@ pub struct NormalizationRow {
     pub people: Vec<String>,
 }
 
+/// Identidade de uma restauração.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestoreRunId(pub(crate) i64);
+
+impl RestoreRunId {
+    /// Valor bruto.
+    pub const fn get(self) -> i64 {
+        self.0
+    }
+}
+
+/// Um item a restaurar, com o que a retomada precisa saber.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RestoreItemRow {
+    /// Item no catálogo.
+    pub media_id: i64,
+    /// Hash do objeto.
+    pub object_hash: String,
+    /// Nome do arquivo.
+    pub filename: String,
+    /// Descrição, o único metadado que a API aceita por campo.
+    pub description: Option<String>,
+    /// Chave que impede reenviar o mesmo item.
+    pub idempotency_key: String,
+    /// Identificador remoto, quando o item já subiu.
+    pub remote_media_id: Option<String>,
+    /// Estado atual.
+    pub status: String,
+    /// Tentativas já feitas.
+    pub attempts: i64,
+}
+
+impl RestoreItemRow {
+    /// Se este item ainda precisa ser enviado.
+    pub fn is_pending(&self) -> bool {
+        self.remote_media_id.is_none() && self.status != "skipped"
+    }
+}
+
 /// Números gerais do cofre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CatalogStats {
