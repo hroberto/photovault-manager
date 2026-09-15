@@ -25,7 +25,7 @@ photovault-exif = { path = "crates/exif" }
 photovault-google = { path = "crates/google" }
 photovault-restore = { path = "crates/restore" }
 tempfile = "3"
-sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
+sqlx = { version = "0.9", default-features = false, features = ["sqlite", "runtime-tokio", "migrate", "macros"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
 photovault-catalog = { path = "crates/catalog" }
 
