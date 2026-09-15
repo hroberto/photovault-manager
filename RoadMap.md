@@ -1198,7 +1198,7 @@ Takeout entrega e que dão ao PhotoVault algo que a API jamais daria.
 ┌──────────────────────────────────────────────────────────────┐
 │ Restaurar para o Google Fotos                                │
 ├──────────────────────────────────────────────────────────────┤
-│ Destino     henrique@gmail.com                    [ trocar ] │
+│ Destino     conta@exemplo.com                    [ trocar ] │
 │ Seleção     Álbum "Viagem Japão"        1.284 itens · 14 GB  │
 │                                                              │
 │ SERÁ RESTAURADO                                              │

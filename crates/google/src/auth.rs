@@ -378,17 +378,17 @@ mod tests {
     #[test]
     fn in_memory_store_round_trips() {
         let store = InMemoryTokenStore::default();
-        assert!(store.load("henrique@gmail.com").is_none());
+        assert!(store.load("conta@exemplo.com").is_none());
 
         store
-            .store("henrique@gmail.com", "1//REFRESH")
+            .store("conta@exemplo.com", "1//REFRESH")
             .expect("guarda");
         assert_eq!(
-            store.load("henrique@gmail.com").as_deref(),
+            store.load("conta@exemplo.com").as_deref(),
             Some("1//REFRESH")
         );
 
-        store.forget("henrique@gmail.com").expect("esquece");
-        assert!(store.load("henrique@gmail.com").is_none());
+        store.forget("conta@exemplo.com").expect("esquece");
+        assert!(store.load("conta@exemplo.com").is_none());
     }
 }

@@ -104,8 +104,8 @@ mod tests {
 
     #[test]
     fn the_same_object_to_the_same_account_has_the_same_key() {
-        let a = idempotency_key("henrique@gmail.com", &hash(1), "google_photos");
-        let b = idempotency_key("henrique@gmail.com", &hash(1), "google_photos");
+        let a = idempotency_key("conta@exemplo.com", &hash(1), "google_photos");
+        let b = idempotency_key("conta@exemplo.com", &hash(1), "google_photos");
         assert_eq!(a, b, "reiniciar não pode significar reenviar");
     }
 
@@ -113,8 +113,8 @@ mod tests {
     fn different_accounts_get_different_keys() {
         // Migrar de conta é um caso de uso legítimo: o mesmo item precisa poder subir na conta
         // nova sem que a chave da conta antiga o bloqueie.
-        let a = idempotency_key("antiga@gmail.com", &hash(1), "google_photos");
-        let b = idempotency_key("nova@gmail.com", &hash(1), "google_photos");
+        let a = idempotency_key("antiga@exemplo.com", &hash(1), "google_photos");
+        let b = idempotency_key("nova@exemplo.com", &hash(1), "google_photos");
         assert_ne!(a, b);
     }
 

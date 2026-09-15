@@ -9,7 +9,7 @@ use photovault_catalog::{Catalog, NewMedia};
 use photovault_core::{Fidelity, MediaId, MediaKind, ObjectHash, SourceKind};
 use photovault_restore::idempotency_key;
 
-const ACCOUNT: &str = "henrique@gmail.com";
+const ACCOUNT: &str = "conta@exemplo.com";
 const SINK: &str = "google_photos";
 
 fn hash(seed: u8) -> ObjectHash {
@@ -140,8 +140,8 @@ async fn migrating_to_another_account_is_allowed() {
         .await
         .expect("abre");
 
-    let old = idempotency_key("antiga@gmail.com", &hash(1), SINK);
-    let new = idempotency_key("nova@gmail.com", &hash(1), SINK);
+    let old = idempotency_key("conta-antiga@exemplo.com", &hash(1), SINK);
+    let new = idempotency_key("conta-nova@exemplo.com", &hash(1), SINK);
 
     assert!(catalog
         .enqueue_restore_item(run, ids[0], &old)
